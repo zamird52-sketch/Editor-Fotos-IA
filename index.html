@@ -25,7 +25,8 @@ const fileInput=document.querySelector('#file'),preview=document.querySelector('
 let original=null,activeFilter='none';
 const values={brightness:100,contrast:100,saturation:100};
 const filterCss={none:'none',vivid:'saturate(1.35) contrast(1.08)',mono:'grayscale(1)',warm:'sepia(.22) saturate(1.18)',cool:'hue-rotate(12deg) saturate(1.12)',night:'brightness(.78) contrast(1.18) saturate(1.2) hue-rotate(8deg)'};
-function currentFilter(){return (activeFilter==='none'?'':filterCss[activeFilter]+' ' )+'brightness('+values.brightness+'%) contrast('+values.contrast+'%) saturate('+values.saturation+'%)';}\nfunction apply(){preview.style.filter=currentFilter();}
+function currentFilter(){return (activeFilter==='none'?'':filterCss[activeFilter]+' ' )+'brightness('+values.brightness+'%) contrast('+values.contrast+'%) saturate('+values.saturation+'%)';}
+function apply(){preview.style.filter=currentFilter();}
 fileInput.addEventListener('change',()=>{const f=fileInput.files&&fileInput.files[0];if(!f)return;if(!f.type.startsWith('image/')){fileName.textContent='Elegí un archivo de imagen válido.';return;}if(original)URL.revokeObjectURL(original);original=URL.createObjectURL(f);preview.src=original;preview.style.display='block';fileName.textContent=f.name;download.disabled=false;apply();});
 document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');activeFilter=b.dataset.filter;apply();}));
 ['brightness','contrast','saturation'].forEach(id=>document.getElementById(id).addEventListener('input',e=>{values[id]=Number(e.target.value);document.getElementById(id+'Out').value=values[id]+'%';apply();}));
@@ -45,7 +46,7 @@ document.querySelector('#prepare').addEventListener('click',async()=>{
  button.disabled=true;button.textContent='⏳ Generando…';box.textContent='Conectando con el modelo de imágenes. Puede tardar un poco…';box.classList.remove('hidden');aiResult.style.display='none';downloadAI.classList.add('hidden');
  try{
   let imageBase64='';
-  if(!isTextOnly){const response=await fetch(original);const blob=await response.blob();imageBase64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(blob);});}
+  if(!isTextOnly){const response=await fetch(original);const blob=await response.blob();const tempUrl=URL.createObjectURL(blob);try{imageBase64=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,511/Math.max(img.naturalWidth,img.naturalHeight));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',0.88));};img.onerror=reject;img.src=tempUrl;});}finally{URL.revokeObjectURL(tempUrl);}}
   const response=await fetch(AI_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:isTextOnly?'generate':'edit',prompt:fullPrompt,imageBase64})});
   const data=await response.json();
   if(!response.ok||!data.image)throw new Error(data.error||'El servicio no pudo generar la imagen.');
