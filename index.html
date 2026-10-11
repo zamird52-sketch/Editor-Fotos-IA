@@ -42,7 +42,11 @@ document.querySelector('#prepare').addEventListener('click',async()=>{
  const isTextOnly=type==='Crear imagen desde texto';
  if(!description){box.textContent='Primero escribí cómo querés que sea la imagen.';box.classList.remove('hidden');return;}
  if(!isTextOnly&&!original){box.textContent='Primero subí una foto para editar, o elegí “Crear imagen desde texto”.';box.classList.remove('hidden');return;}
- const fullPrompt=description+'. Tipo de edición: '+type+'. Estilo visual: '+style+'. Resultado de alta calidad.';
+ const fullPrompt=isTextOnly
+  ? description+'. Estilo visual: '+style+'. Crear una imagen nueva desde cero.'
+  : 'Editá la foto subida, no generes una foto distinta. Cambio solicitado: '+description+
+    '. Tipo de edición: '+type+'. Estilo visual: '+style+
+    '. REGLAS IMPORTANTES: conservá exactamente a la misma persona y su identidad, rasgos faciales, expresión, peinado, textura natural de piel, pose, proporciones, ropa y encuadre, salvo que la descripción pida cambiar uno de esos elementos. Modificá únicamente lo solicitado y dejá todo lo demás igual. No reemplaces a la persona, no inventes otra cara, no embellezcas ni retoques el rostro. Resultado fotográfico natural, sin apariencia artificial.';
  button.disabled=true;button.textContent='⏳ Generando…';box.textContent='Conectando con el modelo de imágenes. Puede tardar un poco…';box.classList.remove('hidden');aiResult.style.display='none';downloadAI.classList.add('hidden');
  try{
   let imageBase64='';
