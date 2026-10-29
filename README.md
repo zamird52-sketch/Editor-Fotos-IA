@@ -3,48 +3,32 @@ title: Separan Voces
 emoji: 🎙️
 colorFrom: purple
 colorTo: blue
-sdk: docker
-app_port: 7860
+sdk: gradio
+app_file: app.py
 pinned: false
 ---
 
 # Separan Voces
 
-Aplicación personal en español para separar una canción en **voz** e **instrumental**, escuchar cada pista por separado y descargar los WAV.
+Aplicación web en español para separar una canción en **voz aislada** y **beat/instrumental**, escuchar cada pista y descargarla en WAV.
 
-## Ponerla en línea desde el celular
+## Cómo funciona
 
-Este repositorio ya incluye la configuración Docker para un **Hugging Face Docker Space**.
+- Interfaz adaptable a celulares con Gradio.
+- Usa Demucs (htdemucs) para separar voz e instrumental.
+- Usa GPU compartida ZeroGPU de Hugging Face mediante el decorador spaces.GPU.
 
-1. En Hugging Face, creá un **Space** nuevo y elegí **Docker** como SDK.
-2. En la configuración del Space, importá/subí los archivos de este repositorio (`index.html`, `app.py`, `requirements.txt`, `Dockerfile` y este `README.md`).
-3. Esperá a que termine la construcción y abrí la pestaña **App**.
+## Publicación
 
-No hace falta entrenar un modelo ni pagar créditos por canción: usa el modelo abierto Demucs. **Importante:** el alojamiento gratuito puede dormir, limitar recursos o cambiar sus condiciones; no existe garantía de procesamiento ilimitado y gratis para siempre. La primera separación puede tardar bastante en CPU y el modelo necesita memoria.
+Este repositorio está preparado para usarse como **Gradio Space con ZeroGPU**. Para obtener un enlace público hay que crear un Space en una cuenta de Hugging Face elegible y subir/sincronizar estos archivos.
 
-## Qué incluye
+1. Entrá a https://huggingface.co/new-space
+2. Elegí el nombre separan-voces, SDK **Gradio** y hardware **ZeroGPU**.
+3. Subí app.py, requirements.txt y este README.md.
+4. Esperá la construcción; después abrí la pestaña App.
 
-- Interfaz web adaptable a celular.
-- Separación con Demucs (`htdemucs`).
-- Reproductores independientes para voz e instrumental.
-- Descarga de ambos resultados en WAV.
-- API FastAPI y endpoint de estado en `/api/health`.
-
-## Ejecutar con Docker en una computadora
-
-```bash
-docker build -t separan-voces .
-docker run --rm -p 7860:7860 -v separan-voces-output:/app/outputs separan-voces
-```
-
-Abrí `http://localhost:7860`.
-
-## Configuración
-
-- `MAX_UPLOAD_MB`: tamaño máximo de archivo (por defecto 100).
-- `DEMUCS_MODEL`: modelo Demucs (por defecto `htdemucs`).
-- `PROCESS_TIMEOUT_SECONDS`: tiempo máximo por tarea (por defecto 1800).
+**Nota:** las cuentas personales gratuitas deben cumplir los requisitos de Hugging Face para alojar ZeroGPU Spaces (cuenta con más de 30 días y correo verificado). La cuota gratuita de GPU es limitada; no es procesamiento ilimitado. Ver https://huggingface.co/docs/hub/spaces-zerogpu
 
 ## Privacidad
 
-El audio se procesa en el servidor donde esté alojada la app. No subas archivos privados a una instancia pública. Los archivos de salida quedan en el almacenamiento del servidor; esta versión todavía no incorpora limpieza automática ni acceso protegido, así que mantené el Space privado para uso personal cuando esa opción esté disponible. Procesá solamente audio que tengas derecho a usar.
+El audio se envía al Space para procesarlo. No subas archivos que no tengas derecho a procesar.
