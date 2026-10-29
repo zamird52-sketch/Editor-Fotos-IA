@@ -1,98 +1,83 @@
 import os
-import shutil
-import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+import gradio as gr
+import spaces
 
-BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = BASE_DIR / "outputs"
-OUTPUT_DIR.mkdir(exist_ok=True)
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "100")) * 1024 * 1024
-ALLOWED_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac", ".wma", ".mp4"}
-
-app = FastAPI(title="Separan Voces", version="1.0.0")
-app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+MODEL_NAME = os.getenv("DEMUCS_MODEL", "htdemucs")
 
 
-@app.get("/", response_class=HTMLResponse)
-def home():
-    return (BASE_DIR / "index.html").read_text(encoding="utf-8")
+@spaces.GPU(duration=300)
+def separate_song(audio_path):
+    if not audio_path:
+        raise gr.Error("Primero elegí una canción.")
+    allowed = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac", ".mp4"}
+    if Path(audio_path).suffix.lower() not in allowed:
+        raise gr.Error("Formato no compatible. Probá MP3, WAV, FLAC, M4A u OGG.")
 
+    import torch
+    import torchaudio
+    from demucs.apply import apply_model
+    from demucs.pretrained import get_model
+    from demucs.audio import convert_audio
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok", "service": "Separan Voces"}
-
-
-@app.post("/api/separate")
-async def separate_audio(file: UploadFile = File(...)):
-    original_name = Path(file.filename or "audio.wav").name
-    extension = Path(original_name).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="Formato no compatible. Probá MP3, WAV, FLAC, M4A u OGG.")
-
-    job_id = uuid.uuid4().hex
-    job_dir = OUTPUT_DIR / job_id
-    job_dir.mkdir(parents=True, exist_ok=False)
-    input_path = job_dir / f"input{extension}"
-    demucs_out = job_dir / "demucs"
     try:
-        total = 0
-        with input_path.open("wb") as destination:
-            while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail=f"El archivo supera el límite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-                destination.write(chunk)
-        if total == 0:
-            raise HTTPException(status_code=400, detail="El archivo está vacío.")
+        model = get_model(MODEL_NAME)
+        device = "cuda"
+        model.to(device)
+        wav, sample_rate = torchaudio.load(audio_path)
+        reference = wav.mean(0)
+        wav = (wav - reference.mean()) / (reference.std() + 1e-8)
+        wav = convert_audio(wav, sample_rate, model.samplerate, model.audio_channels)
+        with torch.inference_mode():
+            sources = apply_model(
+                model, wav[None], device=device, shifts=1,
+                split=True, overlap=0.25, progress=True
+            )[0]
+        sources = sources * reference.std() + reference.mean()
+        vocal_index = model.sources.index("vocals")
+        vocals = sources[vocal_index].cpu()
+        instrumental = (sources.sum(dim=0) - sources[vocal_index]).cpu()
 
-        command = [
-            "python", "-m", "demucs", "--two-stems", "vocals",
-            "-n", os.getenv("DEMUCS_MODEL", "htdemucs"),
-            "-o", str(demucs_out), str(input_path)
-        ]
-        try:
-            process = subprocess.run(command, capture_output=True, text=True, timeout=int(os.getenv("PROCESS_TIMEOUT_SECONDS", "1800")))
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="El procesamiento tardó demasiado. Probá con un archivo más corto.")
-        if process.returncode != 0:
-            detail = (process.stderr or process.stdout or "Falló el modelo de separación.")[-1200:]
-            raise HTTPException(status_code=500, detail="No se pudo separar el audio. " + detail)
-
-        stem_dir = demucs_out / os.getenv("DEMUCS_MODEL", "htdemucs") / input_path.stem
-        vocals_source = stem_dir / "vocals.wav"
-        instrumental_source = stem_dir / "no_vocals.wav"
-        if not vocals_source.exists() or not instrumental_source.exists():
-            raise HTTPException(status_code=500, detail="El modelo terminó pero no se encontraron las dos pistas de salida.")
-        vocals_dest = job_dir / "voz-aislada.wav"
-        instrumental_dest = job_dir / "instrumental.wav"
-        shutil.copy2(vocals_source, vocals_dest)
-        shutil.copy2(instrumental_source, instrumental_dest)
-        shutil.rmtree(demucs_out, ignore_errors=True)
-        input_path.unlink(missing_ok=True)
-        return {
-            "job_id": job_id,
-            "vocals_url": f"/outputs/{job_id}/voz-aislada.wav",
-            "instrumental_url": f"/outputs/{job_id}/instrumental.wav",
-            "vocals_filename": "voz-aislada.wav",
-            "instrumental_filename": "instrumental.wav"
-        }
-    except HTTPException:
-        shutil.rmtree(job_dir, ignore_errors=True)
+        output_dir = tempfile.mkdtemp(prefix="separan-voces-")
+        vocal_path = os.path.join(output_dir, "voz-aislada.wav")
+        instrumental_path = os.path.join(output_dir, "beat-instrumental.wav")
+        torchaudio.save(vocal_path, vocals, model.samplerate)
+        torchaudio.save(instrumental_path, instrumental, model.samplerate)
+        del model, sources
+        torch.cuda.empty_cache()
+        return vocal_path, instrumental_path, vocal_path, instrumental_path, "¡Listo! Escuchá o descargá cada pista."
+    except gr.Error:
         raise
     except Exception as exc:
-        shutil.rmtree(job_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Error procesando el audio: {exc}") from exc
-    finally:
-        await file.close()
+        raise gr.Error(f"No se pudo separar el audio: {str(exc)[:400]}") from exc
 
+
+with gr.Blocks(title="Separan Voces", theme=gr.themes.Soft()) as demo:
+    gr.Markdown(
+        "# 🎙️ Separan Voces\n"
+        "Subí una canción y obtené **la voz aislada** y **el beat/instrumental** por separado."
+    )
+    song = gr.Audio(label="Tu canción", type="filepath", sources=["upload"])
+    separate_button = gr.Button("Separar voz y beat", variant="primary")
+    status = gr.Markdown()
+    with gr.Row():
+        with gr.Column():
+            voice_audio = gr.Audio(label="🎤 Voz aislada", type="filepath")
+            voice_file = gr.File(label="Descargar voz (WAV)")
+        with gr.Column():
+            instrumental_audio = gr.Audio(label="🥁 Beat / instrumental", type="filepath")
+            instrumental_file = gr.File(label="Descargar instrumental (WAV)")
+    separate_button.click(
+        fn=separate_song,
+        inputs=[song],
+        outputs=[voice_audio, instrumental_audio, voice_file, instrumental_file, status],
+    )
+    gr.Markdown(
+        "El procesamiento usa Demucs en una GPU compartida. La disponibilidad y el tiempo "
+        "pueden variar según la cuota gratuita del servicio."
+    )
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    demo.launch()
